@@ -2,7 +2,7 @@ using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
-namespace pac_man
+namespace pac_man.Game
 {
     public static class TextureGenerator
     {

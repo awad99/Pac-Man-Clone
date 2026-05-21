@@ -1,4 +1,4 @@
-namespace pac_man
+namespace pac_man.Game
 {
     public enum GameState
     {

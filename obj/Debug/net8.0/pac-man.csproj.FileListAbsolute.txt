@@ -31,3 +31,4 @@ C:\Users\awad\source\repos\pac-man\pac-man\obj\Debug\net8.0\refint\pac-man.dll
 C:\Users\awad\source\repos\pac-man\pac-man\obj\Debug\net8.0\pac-man.pdb
 C:\Users\awad\source\repos\pac-man\pac-man\obj\Debug\net8.0\pac-man.genruntimeconfig.cache
 C:\Users\awad\source\repos\pac-man\pac-man\obj\Debug\net8.0\ref\pac-man.dll
+C:\Users\awad\source\repos\pac-man\pac-man\obj\Debug\net8.0\pac-man.sourcelink.json

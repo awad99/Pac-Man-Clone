@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using Microsoft.Xna.Framework.Audio;
 
-namespace pac_man
+namespace pac_man.Game
 {
     public static class SoundSynth
     {

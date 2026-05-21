@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
-namespace pac_man
+namespace pac_man.Game
 {
     public enum GhostState
     {
