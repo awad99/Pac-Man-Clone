@@ -4,6 +4,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Microsoft.Xna.Framework.Audio;
+using pac_man.Game.AI;
 
 namespace pac_man.Game
 {
@@ -21,6 +22,11 @@ namespace pac_man.Game
         private ClassicMaze _maze;
         private Pacman _pacman;
         private Ghost[] _ghosts; // 0 = Blinky, 1 = Pinky, 2 = Inky, 3 = Clyde
+
+        // Cognitive AI Engine
+        private CognitiveEngine _cognitiveEngine;
+        private bool _aiActive = true;
+        private KeyboardState _prevKeyboardState;
 
         // Game States and Timers
         private GameState _state;
@@ -89,6 +95,9 @@ namespace pac_man.Game
             _level = 1;
             _score = 0;
             LoadHighScore();
+
+            _cognitiveEngine = new CognitiveEngine(_maze);
+            _prevKeyboardState = Keyboard.GetState();
 
             base.Initialize();
         }
@@ -170,6 +179,7 @@ namespace pac_man.Game
             }
 
             StopLoopingSounds();
+            _cognitiveEngine?.ResetEpisode();
         }
 
         private void PlaySound(SoundEffect effect)
@@ -211,7 +221,7 @@ namespace pac_man.Game
             switch (_state)
             {
                 case GameState.StartScreen:
-                    if (Keyboard.GetState().IsKeyDown(Keys.Enter))
+                    if (Keyboard.GetState().IsKeyDown(Keys.Enter) || _aiActive)
                     {
                         StartNewGame();
                     }
@@ -226,7 +236,21 @@ namespace pac_man.Game
                     break;
 
                 case GameState.Playing:
-                    UpdateGameplay(gameTime);
+                    {
+                        int updateCount = 1;
+                        var keys = Keyboard.GetState();
+                        if (_aiActive && (keys.IsKeyDown(Keys.Space) || keys.IsKeyDown(Keys.Tab)))
+                        {
+                            updateCount = 10;
+                        }
+
+                        for (int u = 0; u < updateCount; u++)
+                        {
+                            UpdateGameplay(gameTime);
+                            if (_state != GameState.Playing)
+                                break;
+                        }
+                    }
                     break;
 
                 case GameState.FrightenedFreeze:
@@ -243,6 +267,12 @@ namespace pac_man.Game
                     if (_stateTimer <= 0)
                     {
                         _pacman.Lives--;
+                        try
+                        {
+                            File.AppendAllText("ai_results.log", $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Death. Lives left: {_pacman.Lives}, Score: {_score}, Level: {_level}\n");
+                        }
+                        catch { }
+
                         if (_pacman.Lives > 0)
                         {
                             ResetPositions();
@@ -251,6 +281,12 @@ namespace pac_man.Game
                         }
                         else
                         {
+                            try
+                            {
+                                File.AppendAllText("ai_results.log", $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - GAME OVER. Final Score: {_score}, Level: {_level}\n");
+                            }
+                            catch { }
+
                             _state = GameState.GameOver;
                             _stateTimer = 3.0f;
                             SaveHighScore();
@@ -276,6 +312,13 @@ namespace pac_man.Game
                     break;
             }
 
+            var kState = Keyboard.GetState();
+            if (kState.IsKeyDown(Keys.A) && _prevKeyboardState.IsKeyUp(Keys.A))
+            {
+                _aiActive = !_aiActive;
+            }
+            _prevKeyboardState = kState;
+
             base.Update(gameTime);
         }
 
@@ -285,7 +328,53 @@ namespace pac_man.Game
             _gameplayTimer += dt;
 
             // 1. Core input handle for steering Pacman
-            _pacman.HandleInput();
+            if (_aiActive)
+            {
+                PacmanState pacState = new PacmanState
+                {
+                    PacmanTileX = _pacman.TileX,
+                    PacmanTileY = _pacman.TileY,
+                    PacmanDir = _pacman.CurrentDir,
+                    IsPacmanDead = _pacman.IsDead,
+                    Lives = _pacman.Lives,
+                    Level = _level,
+                    Score = _score,
+                    DotsEaten = _dotsEatenThisLevel,
+                    TotalDots = _maze.TotalDots,
+                    IsFruitActive = _fruitActive,
+                    FruitTile = _fruitTile,
+                    Maze = _maze
+                };
+                for (int i = 0; i < 4; i++)
+                {
+                    pacState.Ghosts[i] = new GhostInfo
+                    {
+                        TileX = _ghosts[i].TileX,
+                        TileY = _ghosts[i].TileY,
+                        Direction = _ghosts[i].CurrentDir,
+                        State = _ghosts[i].State,
+                        FrightTimer = _ghosts[i].FrightTimer
+                    };
+                }
+
+                Direction aiDir = _cognitiveEngine.Think(pacState);
+                if (aiDir != Direction.None)
+                {
+                    if (IsOpposite(aiDir, _pacman.CurrentDir))
+                    {
+                        _pacman.CurrentDir = aiDir;
+                        _pacman.QueuedDir = Direction.None;
+                    }
+                    else
+                    {
+                        _pacman.QueuedDir = aiDir;
+                    }
+                }
+            }
+            else
+            {
+                _pacman.HandleInput();
+            }
 
             // 2. Play Background Siren
             UpdateSirenAudio();
@@ -380,6 +469,12 @@ namespace pac_man.Game
                 // Level Completed Check
                 if (_maze.TotalDots == 0)
                 {
+                    try
+                    {
+                        File.AppendAllText("ai_results.log", $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Level Complete. Completed Level: {_level}, Score: {_score}\n");
+                    }
+                    catch { }
+
                     _state = GameState.LevelComplete;
                     _stateTimer = 2.5f; // Wall flashing delay
                     StopLoopingSounds();
@@ -465,6 +560,8 @@ namespace pac_man.Game
                         _pacman.IsDead = true;
                         StopLoopingSounds();
                         PlaySound(SoundSynth.Death);
+
+                        _cognitiveEngine?.LearnFromDeath();
                         return;
                     }
                 }
@@ -700,7 +797,26 @@ namespace pac_man.Game
                 new Vector2(24 * ClassicMaze.TileSize, 34 * ClassicMaze.TileSize), 
                 Color.White);
 
+            // 8. Draw AI status text
+            if (_aiActive)
+            {
+                TextRenderer.DrawText(_spriteBatch, "AI ACTIVE", 9 * ClassicMaze.TileSize, 34 * ClassicMaze.TileSize + 2, Color.Cyan, 1);
+                string memStr = $"MEM:{_cognitiveEngine?.MemoryCount ?? 0}";
+                TextRenderer.DrawText(_spriteBatch, memStr, 17 * ClassicMaze.TileSize, 34 * ClassicMaze.TileSize + 2, Color.Lime, 1);
+            }
+            else
+            {
+                TextRenderer.DrawText(_spriteBatch, "MANUAL", 11 * ClassicMaze.TileSize, 34 * ClassicMaze.TileSize + 2, Color.Yellow, 1);
+            }
+        }
 
+        private bool IsOpposite(Direction d1, Direction d2)
+        {
+            if (d1 == Direction.Up && d2 == Direction.Down) return true;
+            if (d1 == Direction.Down && d2 == Direction.Up) return true;
+            if (d1 == Direction.Left && d2 == Direction.Right) return true;
+            if (d1 == Direction.Right && d2 == Direction.Left) return true;
+            return false;
         }
     }
 }

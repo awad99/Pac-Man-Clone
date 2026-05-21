@@ -90,6 +90,11 @@ namespace pac_man.Game
             else
                 Speed = 1.2f; // Normal speed
 
+            if (QueuedDir == CurrentDir)
+            {
+                QueuedDir = Direction.None;
+            }
+
             // 1. Check if we can turn into the queued direction
             if (QueuedDir != Direction.None)
             {
