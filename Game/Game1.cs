@@ -269,11 +269,6 @@ namespace pac_man.Game
                     if (_stateTimer <= 0)
                     {
                         _pacman.Lives--;
-                        try
-                        {
-                            File.AppendAllText("ai_results.log", $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Death. Lives left: {_pacman.Lives}, Score: {_score}, Level: {_level}\n");
-                        }
-                        catch { }
 
                         if (_pacman.Lives > 0)
                         {
@@ -283,12 +278,6 @@ namespace pac_man.Game
                         }
                         else
                         {
-                            try
-                            {
-                                File.AppendAllText("ai_results.log", $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - GAME OVER. Final Score: {_score}, Level: {_level}\n");
-                            }
-                            catch { }
-
                             _state = GameState.GameOver;
                             _stateTimer = 3.0f;
                             SaveHighScore();
@@ -493,12 +482,6 @@ namespace pac_man.Game
                 // Level Completed Check
                 if (_maze.TotalDots == 0)
                 {
-                    try
-                    {
-                        File.AppendAllText("ai_results.log", $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - Level Complete. Completed Level: {_level}, Score: {_score}\n");
-                    }
-                    catch { }
-
                     _state = GameState.LevelComplete;
                     _stateTimer = 2.5f; // Wall flashing delay
                     StopLoopingSounds();
