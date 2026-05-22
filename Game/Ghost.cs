@@ -35,6 +35,7 @@ namespace pac_man.Game
         public int TargetY;
 
         public float Speed;
+        public int DotCounter; // Dots eaten tracking for release
         
         // Inside house bounce properties
         private float _bounceTimer;
@@ -94,6 +95,7 @@ namespace pac_man.Game
             _animFrame = 0;
             FrightTimer = 0f;
             Speed = 1.0f;
+            DotCounter = 0;
         }
 
         // Force immediate 180 turn (triggered when switching modes like Chase <-> Scatter)
@@ -161,6 +163,7 @@ namespace pac_man.Game
                 {
                     // Reached door! Re-enter house to regenerate
                     State = GhostState.InsideHouse;
+                    DotCounter = 0;
                     Position = _homePositions[Index];
                     CurrentDir = Direction.Up;
                     NextDir = Direction.Up;
@@ -380,6 +383,18 @@ namespace pac_man.Game
 
                 int nx, ny;
                 Pacman.GetNextTileCoords(upcomingX, upcomingY, d, out nx, out ny);
+
+                // Special check for forbidden upward turns (only in Chase or Scatter)
+                if (d == Direction.Up && (State == GhostState.Chase || State == GhostState.Scatter))
+                {
+                    if ((upcomingX == 12 && upcomingY == 14) ||
+                        (upcomingX == 15 && upcomingY == 14) ||
+                        (upcomingX == 12 && upcomingY == 26) ||
+                        (upcomingX == 15 && upcomingY == 26))
+                    {
+                        continue;
+                    }
+                }
 
                 bool isEatenOrExiting = (State == GhostState.Eaten || State == GhostState.ExitingHouse);
                 if (!maze.IsGhostBlocked(nx, ny, isEatenOrExiting))

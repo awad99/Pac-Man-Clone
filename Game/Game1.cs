@@ -4,8 +4,6 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Microsoft.Xna.Framework.Audio;
-using pac_man.Game.AI;
-
 namespace pac_man.Game
 {
     public class Game1 : Microsoft.Xna.Framework.Game
@@ -22,11 +20,6 @@ namespace pac_man.Game
         private ClassicMaze _maze;
         private Pacman _pacman;
         private Ghost[] _ghosts; // 0 = Blinky, 1 = Pinky, 2 = Inky, 3 = Clyde
-
-        // Cognitive AI Engine
-        private CognitiveEngine _cognitiveEngine;
-        private bool _aiActive = true;
-        private KeyboardState _prevKeyboardState;
 
         // Game States and Timers
         private GameState _state;
@@ -59,6 +52,11 @@ namespace pac_man.Game
         private SoundEffectInstance _sirenInstance;
         private SoundEffectInstance _frightSirenInstance;
         private float _wakaTimer; // Limits waka play rate
+
+        // Ghost house release variables
+        private bool _globalDotCounterActive;
+        private int _globalDotCounter;
+        private float _ghostReleaseTimer;
 
         public Game1()
         {
@@ -96,8 +94,7 @@ namespace pac_man.Game
             _score = 0;
             LoadHighScore();
 
-            _cognitiveEngine = new CognitiveEngine(_maze);
-            _prevKeyboardState = Keyboard.GetState();
+
 
             base.Initialize();
         }
@@ -164,6 +161,14 @@ namespace pac_man.Game
 
             ResetPositions();
 
+            _globalDotCounterActive = false;
+            _globalDotCounter = 0;
+            _ghostReleaseTimer = 0f;
+            for (int i = 0; i < 4; i++)
+            {
+                _ghosts[i].DotCounter = 0;
+            }
+
             _state = GameState.ReadyWait;
             _stateTimer = 4.2f; // Freeze for length of starting theme
 
@@ -179,7 +184,18 @@ namespace pac_man.Game
             }
 
             StopLoopingSounds();
-            _cognitiveEngine?.ResetEpisode();
+
+            _globalDotCounterActive = true;
+            _globalDotCounter = 0;
+            _ghostReleaseTimer = 0f;
+        }
+
+        private int GetIndividualDotLimit(int ghostIndex)
+        {
+            if (ghostIndex == 1) return 0; // Pinky
+            if (ghostIndex == 2) return (_level == 1) ? 30 : 0; // Inky
+            if (ghostIndex == 3) return (_level == 1) ? 60 : (_level == 2 ? 50 : 0); // Clyde
+            return 0; // Blinky
         }
 
         private void PlaySound(SoundEffect effect)
@@ -221,7 +237,7 @@ namespace pac_man.Game
             switch (_state)
             {
                 case GameState.StartScreen:
-                    if (Keyboard.GetState().IsKeyDown(Keys.Enter) || _aiActive)
+                    if (Keyboard.GetState().IsKeyDown(Keys.Enter))
                     {
                         StartNewGame();
                     }
@@ -236,21 +252,7 @@ namespace pac_man.Game
                     break;
 
                 case GameState.Playing:
-                    {
-                        int updateCount = 1;
-                        var keys = Keyboard.GetState();
-                        if (_aiActive && (keys.IsKeyDown(Keys.Space) || keys.IsKeyDown(Keys.Tab)))
-                        {
-                            updateCount = 10;
-                        }
-
-                        for (int u = 0; u < updateCount; u++)
-                        {
-                            UpdateGameplay(gameTime);
-                            if (_state != GameState.Playing)
-                                break;
-                        }
-                    }
+                    UpdateGameplay(gameTime);
                     break;
 
                 case GameState.FrightenedFreeze:
@@ -312,12 +314,7 @@ namespace pac_man.Game
                     break;
             }
 
-            var kState = Keyboard.GetState();
-            if (kState.IsKeyDown(Keys.A) && _prevKeyboardState.IsKeyUp(Keys.A))
-            {
-                _aiActive = !_aiActive;
-            }
-            _prevKeyboardState = kState;
+
 
             base.Update(gameTime);
         }
@@ -328,53 +325,7 @@ namespace pac_man.Game
             _gameplayTimer += dt;
 
             // 1. Core input handle for steering Pacman
-            if (_aiActive)
-            {
-                PacmanState pacState = new PacmanState
-                {
-                    PacmanTileX = _pacman.TileX,
-                    PacmanTileY = _pacman.TileY,
-                    PacmanDir = _pacman.CurrentDir,
-                    IsPacmanDead = _pacman.IsDead,
-                    Lives = _pacman.Lives,
-                    Level = _level,
-                    Score = _score,
-                    DotsEaten = _dotsEatenThisLevel,
-                    TotalDots = _maze.TotalDots,
-                    IsFruitActive = _fruitActive,
-                    FruitTile = _fruitTile,
-                    Maze = _maze
-                };
-                for (int i = 0; i < 4; i++)
-                {
-                    pacState.Ghosts[i] = new GhostInfo
-                    {
-                        TileX = _ghosts[i].TileX,
-                        TileY = _ghosts[i].TileY,
-                        Direction = _ghosts[i].CurrentDir,
-                        State = _ghosts[i].State,
-                        FrightTimer = _ghosts[i].FrightTimer
-                    };
-                }
-
-                Direction aiDir = _cognitiveEngine.Think(pacState);
-                if (aiDir != Direction.None)
-                {
-                    if (IsOpposite(aiDir, _pacman.CurrentDir))
-                    {
-                        _pacman.CurrentDir = aiDir;
-                        _pacman.QueuedDir = Direction.None;
-                    }
-                    else
-                    {
-                        _pacman.QueuedDir = aiDir;
-                    }
-                }
-            }
-            else
-            {
-                _pacman.HandleInput();
-            }
+            _pacman.HandleInput();
 
             // 2. Play Background Siren
             UpdateSirenAudio();
@@ -409,18 +360,49 @@ namespace pac_man.Game
                 }
             }
 
-            // 4. Dot Counter release gates for Ghosts inside the house
-            // Blinky starts outside (Index 0). Pinky (1) exits immediately.
-            if (_ghosts[1].State == GhostState.InsideHouse)
-                _ghosts[1].State = GhostState.ExitingHouse;
+            // 4. Ghost house release logic (dot counters and failsafe timer)
+            // Increment failsafe timer
+            _ghostReleaseTimer += dt;
 
-            // Inky (2) exits after 30 dots
-            if (_ghosts[2].State == GhostState.InsideHouse && _dotsEatenThisLevel >= 30)
-                _ghosts[2].State = GhostState.ExitingHouse;
+            // Immediate release for Blinky (0) if he's inside the house
+            if (_ghosts[0].State == GhostState.InsideHouse)
+            {
+                _ghosts[0].State = GhostState.ExitingHouse;
+            }
 
-            // Clyde (3) exits after 60 dots
-            if (_ghosts[3].State == GhostState.InsideHouse && _dotsEatenThisLevel >= 60)
-                _ghosts[3].State = GhostState.ExitingHouse;
+            // If global counter is inactive, release active ghost if their individual limit is 0
+            if (!_globalDotCounterActive)
+            {
+                int activeGhostIdx = -1;
+                if (_ghosts[1].State == GhostState.InsideHouse) activeGhostIdx = 1;
+                else if (_ghosts[2].State == GhostState.InsideHouse) activeGhostIdx = 2;
+                else if (_ghosts[3].State == GhostState.InsideHouse) activeGhostIdx = 3;
+
+                if (activeGhostIdx != -1 && GetIndividualDotLimit(activeGhostIdx) == 0)
+                {
+                    _ghosts[activeGhostIdx].State = GhostState.ExitingHouse;
+                }
+            }
+
+            // Failsafe release timer check
+            float releaseLimit = (_level >= 5) ? 3.0f : 4.0f;
+            if (_ghostReleaseTimer >= releaseLimit)
+            {
+                _ghostReleaseTimer = 0f;
+                int ghostToRelease = -1;
+                if (_ghosts[1].State == GhostState.InsideHouse) ghostToRelease = 1;
+                else if (_ghosts[2].State == GhostState.InsideHouse) ghostToRelease = 2;
+                else if (_ghosts[3].State == GhostState.InsideHouse) ghostToRelease = 3;
+
+                if (ghostToRelease != -1)
+                {
+                    _ghosts[ghostToRelease].State = GhostState.ExitingHouse;
+                    if (ghostToRelease == 3)
+                    {
+                        _globalDotCounterActive = false;
+                    }
+                }
+            }
 
             // 5. Update Pac-man position
             bool wasEating = false;
@@ -429,6 +411,48 @@ namespace pac_man.Game
             {
                 wasEating = true;
                 _dotsEatenThisLevel++;
+
+                // Eating a dot resets the failsafe timer
+                _ghostReleaseTimer = 0f;
+
+                // Handle dot counter release triggers
+                if (_globalDotCounterActive)
+                {
+                    _globalDotCounter++;
+                    if (_ghosts[1].State == GhostState.InsideHouse && _globalDotCounter >= 7)
+                    {
+                        _ghosts[1].State = GhostState.ExitingHouse;
+                    }
+                    if (_ghosts[2].State == GhostState.InsideHouse && _globalDotCounter >= 17)
+                    {
+                        _ghosts[2].State = GhostState.ExitingHouse;
+                    }
+                    if (_ghosts[3].State == GhostState.InsideHouse && _globalDotCounter >= 32)
+                    {
+                        _ghosts[3].State = GhostState.ExitingHouse;
+                        _globalDotCounterActive = false;
+                    }
+                    else if (_globalDotCounter >= 32)
+                    {
+                        _globalDotCounterActive = false;
+                    }
+                }
+                else
+                {
+                    int activeGhostIdx = -1;
+                    if (_ghosts[1].State == GhostState.InsideHouse) activeGhostIdx = 1;
+                    else if (_ghosts[2].State == GhostState.InsideHouse) activeGhostIdx = 2;
+                    else if (_ghosts[3].State == GhostState.InsideHouse) activeGhostIdx = 3;
+
+                    if (activeGhostIdx != -1)
+                    {
+                        _ghosts[activeGhostIdx].DotCounter++;
+                        if (_ghosts[activeGhostIdx].DotCounter >= GetIndividualDotLimit(activeGhostIdx))
+                        {
+                            _ghosts[activeGhostIdx].State = GhostState.ExitingHouse;
+                        }
+                    }
+                }
                 
                 int pointVal = isEnergizer ? 50 : 10;
                 AddScore(pointVal);
@@ -561,7 +585,7 @@ namespace pac_man.Game
                         StopLoopingSounds();
                         PlaySound(SoundSynth.Death);
 
-                        _cognitiveEngine?.LearnFromDeath();
+
                         return;
                     }
                 }
@@ -663,15 +687,28 @@ namespace pac_man.Game
 
                 case GameState.PacmanDeath:
                     DrawGameplayBoard(drawPacman: false, drawGhosts: false);
-                    // Draw dying Pacman custom mouth dissolving/spin animations
-                    // Or since we want high reliability, we draw him scaling down to 0
-                    if (_stateTimer > 0.8f)
+                    if (_stateTimer > 1.6f)
                     {
-                        // Still visible
-                        int animD = (int)(_stateTimer * 10) % 3; // fake spin mouth
-                        Texture2D deadTex = TextureGenerator.PacmanTextures[2][animD]; // left waka
+                        // 1. Freeze phase: draw normal Pacman facing his last direction
+                        int dirIndex = 3;
+                        if (_pacman.CurrentDir == Direction.Up)    dirIndex = 0;
+                        if (_pacman.CurrentDir == Direction.Down)  dirIndex = 1;
+                        if (_pacman.CurrentDir == Direction.Left)  dirIndex = 2;
+                        if (_pacman.CurrentDir == Direction.Right) dirIndex = 3;
+
+                        Texture2D tex = TextureGenerator.PacmanTextures[dirIndex][0];
+                        _spriteBatch.Draw(tex, new Vector2(_pacman.Position.X - 4, _pacman.Position.Y - 4), Color.White);
+                    }
+                    else if (_stateTimer > 0.4f)
+                    {
+                        // 2. Dissolve/Death Animation phase
+                        float progress = (1.6f - _stateTimer) / 1.2f;
+                        int frame = (int)(progress * 11);
+                        frame = Math.Clamp(frame, 0, 10);
+                        Texture2D deadTex = TextureGenerator.PacmanDeathTextures[frame];
                         _spriteBatch.Draw(deadTex, new Vector2(_pacman.Position.X - 4, _pacman.Position.Y - 4), Color.White);
                     }
+                    // 3. Invisible phase: do not draw Pac-Man
                     break;
 
                 case GameState.LevelComplete:
@@ -716,12 +753,12 @@ namespace pac_man.Game
         private void DrawStartScreen()
         {
             // Title PAC-MAN
-            TextRenderer.DrawText(_spriteBatch, "PAC-MAN", 4 * ClassicMaze.TileSize, 6 * ClassicMaze.TileSize, Color.Yellow, 3);
+            TextRenderer.DrawText(_spriteBatch, "PAC-MAN", 3 * ClassicMaze.TileSize, 6 * ClassicMaze.TileSize, Color.Yellow, 3);
 
             // Blinking start command
             if ((_frameCounter / 30) % 2 == 0)
             {
-                TextRenderer.DrawText(_spriteBatch, "PRESS ENTER TO PLAY", 2 * ClassicMaze.TileSize + 4, 14 * ClassicMaze.TileSize, Color.Cyan, 1);
+                TextRenderer.DrawText(_spriteBatch, "PRESS ENTER TO PLAY", 3 * ClassicMaze.TileSize + 10, 14 * ClassicMaze.TileSize, Color.Cyan, 1);
             }
 
             // High Score Banner
@@ -729,8 +766,7 @@ namespace pac_man.Game
             string hsString = _highScore.ToString().PadLeft(6, '0');
             TextRenderer.DrawText(_spriteBatch, hsString, 9 * ClassicMaze.TileSize, 22 * ClassicMaze.TileSize, Color.Yellow, 1);
 
-            // Developer / Copy
-            TextRenderer.DrawText(_spriteBatch, "2026 DEEPMIND ANTIGRAVITY", 2 * ClassicMaze.TileSize, 30 * ClassicMaze.TileSize, Color.Red, 1);
+         
         }
 
         private void DrawGameplayBoard(bool drawPacman = true, bool drawGhosts = true)
@@ -797,17 +833,7 @@ namespace pac_man.Game
                 new Vector2(24 * ClassicMaze.TileSize, 34 * ClassicMaze.TileSize), 
                 Color.White);
 
-            // 8. Draw AI status text
-            if (_aiActive)
-            {
-                TextRenderer.DrawText(_spriteBatch, "AI ACTIVE", 9 * ClassicMaze.TileSize, 34 * ClassicMaze.TileSize + 2, Color.Cyan, 1);
-                string memStr = $"MEM:{_cognitiveEngine?.MemoryCount ?? 0}";
-                TextRenderer.DrawText(_spriteBatch, memStr, 17 * ClassicMaze.TileSize, 34 * ClassicMaze.TileSize + 2, Color.Lime, 1);
-            }
-            else
-            {
-                TextRenderer.DrawText(_spriteBatch, "MANUAL", 11 * ClassicMaze.TileSize, 34 * ClassicMaze.TileSize + 2, Color.Yellow, 1);
-            }
+
         }
 
         private bool IsOpposite(Direction d1, Direction d2)

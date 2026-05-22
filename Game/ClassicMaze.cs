@@ -85,8 +85,7 @@ namespace pac_man.Game
             // Wrap X for tunnel
             if (y == 17)
             {
-                if (x < 0) x = Width - 1;
-                if (x >= Width) x = 0;
+                x = (x % Width + Width) % Width;
             }
 
             if (x < 0 || x >= Width || y < 0 || y >= Height)

@@ -10,6 +10,7 @@ namespace pac_man.Game
         // Directions: 0 = Up, 1 = Down, 2 = Left, 3 = Right
         // Frames: 0 = Closed, 1 = Partial, 2 = Open
         public static Texture2D[][] PacmanTextures;
+        public static Texture2D[] PacmanDeathTextures;
 
         // Ghost textures: [GhostColor][Direction][Frame]
         // GhostColor: 0 = Red (Blinky), 1 = Pink (Pinky), 2 = Cyan (Inky), 3 = Orange (Clyde)
@@ -131,6 +132,13 @@ namespace pac_man.Game
 
             // 6. Load Cherry
             CherryTexture = ExtractSprite(graphicsDevice, spritesheet, 171, 182, 16, 16);
+
+            // 7. Load Pac-Man Death Textures
+            PacmanDeathTextures = new Texture2D[11];
+            for (int f = 0; f < 11; f++)
+            {
+                PacmanDeathTextures[f] = Extract(f * 20 + 2, 242);
+            }
         }
 
         private static Texture2D ExtractSprite(GraphicsDevice gd, Texture2D source, int x, int y, int width, int height)
